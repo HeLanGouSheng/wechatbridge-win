@@ -242,7 +242,9 @@ public static class CommandLine
         {
             if (chatName is null)
             {
-                log.WriteLine($"这是群聊（{string.Join("、", request.Senders)}），需要加 --chat-name 群名");
+                log.WriteLine(request.MyNameUnknown
+                    ? $"分不清 {string.Join("、", request.Senders)} 里哪个是你：先 --configure --my-names 你的昵称；真是群聊就加 --chat-name 群名"
+                    : $"这是群聊（{string.Join("、", request.Senders)}），需要加 --chat-name 群名");
                 return Task.FromResult<ChatNameAnswer?>(null);
             }
 

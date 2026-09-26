@@ -1,15 +1,31 @@
 <Window x:Class="Bridge.App.Views.ChatNameDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="这是哪个群？" Width="460" SizeToContent="Height" ResizeMode="NoResize"
+        Title="这是谁的聊天？" Width="480" SizeToContent="Height" ResizeMode="NoResize"
         WindowStartupLocation="CenterScreen" Topmost="True">
     <StackPanel Margin="16">
         <TextBlock x:Name="Intro" TextWrapping="Wrap" Margin="0,0,0,10" />
-        <TextBlock Text="群名" Margin="0,0,0,4" />
-        <TextBox x:Name="NameBox" Padding="4,3" Margin="0,0,0,8" />
-        <CheckBox x:Name="Remember" IsChecked="True" Content="记住这个群，下次这些人再出现就不问了" Margin="0,0,0,12" />
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button Content="确定" Padding="12,4" Margin="0,0,8,0" IsDefault="True" Click="Ok_Click" />
+
+        <StackPanel x:Name="WhoPanel" Visibility="Collapsed" Margin="0,0,0,4">
+            <TextBlock Text="哪个是你自己？选了以后就记住，下次不再问。" Margin="0,0,0,8" />
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                <Button x:Name="FirstIsMe" Padding="12,4" Margin="0,0,8,0" Click="FirstIsMe_Click" />
+                <Button x:Name="SecondIsMe" Padding="12,4" Margin="0,0,8,0" Click="SecondIsMe_Click" />
+                <Button Content="都不是，这是群聊" Padding="12,4" Click="IsGroup_Click" />
+            </StackPanel>
+        </StackPanel>
+
+        <StackPanel x:Name="GroupPanel">
+            <TextBlock Text="群名" Margin="0,0,0,4" />
+            <TextBox x:Name="NameBox" Padding="4,3" Margin="0,0,0,8" />
+            <CheckBox x:Name="Remember" IsChecked="True" Content="记住这个群，下次这些人再出现就不问了" Margin="0,0,0,12" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="确定" Padding="12,4" Margin="0,0,8,0" IsDefault="True" Click="Ok_Click" />
+                <Button Content="这次不发" Padding="12,4" IsCancel="True" />
+            </StackPanel>
+        </StackPanel>
+
+        <StackPanel x:Name="WhoFooter" Orientation="Horizontal" HorizontalAlignment="Right" Visibility="Collapsed" Margin="0,8,0,0">
             <Button Content="这次不发" Padding="12,4" IsCancel="True" />
         </StackPanel>
     </StackPanel>

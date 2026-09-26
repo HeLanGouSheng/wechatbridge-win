@@ -62,10 +62,12 @@ public class LlmSocialDeliveryTests : IDisposable
         return staging.Commit(new BatchManifest(staging.Id.Value, DateTimeOffset.UtcNow, BatchManifest.SourceArgv, Array.Empty<string>(), ChatName: chatName));
     }
 
+    private readonly List<string> _rememberedNames = new();
+
     private LlmSocialDelivery Delivery(CapturingHandler handler, params string[] myNames)
     {
         var config = new LlmSocialConfig("http://127.0.0.1:8788", "acct_abcdefghijkl", Secret);
-        return new LlmSocialDelivery(new LlmSocialClient(new HttpClient(handler), config), myNames, _groups, _records, _inbox, TimeProvider.System, Beijing);
+        return new LlmSocialDelivery(new LlmSocialClient(new HttpClient(handler), config), myNames, _rememberedNames.Add, _groups, _records, _inbox, TimeProvider.System, Beijing);
     }
 
     private static HttpResponseMessage Ok() => new(HttpStatusCode.OK) { Content = new StringContent("{\"ok\":true}") };
@@ -122,6 +124,41 @@ public class LlmSocialDeliveryTests : IDisposable
     }
 
     [Fact]
+    public async Task TwoUnknownSendersAskWhoIsMeAndRememberIt()
+    {
+        var handler = new CapturingHandler(_ => Ok());
+        ChatNameRequest? seen = null;
+        var outcome = await Delivery(handler).DeliverAsync(Batch("a.zip", "·老周\n2026年9月26日 16:58\n做好了吗\n\n·秋一\n2026年9月26日 16:59\n在测\n"), request =>
+        {
+            seen = request;
+            return Task.FromResult<ChatNameAnswer?>(new ChatNameAnswer(null, false, "秋一"));
+        });
+
+        Assert.True(seen!.MyNameUnknown);
+        Assert.Equal(new[] { "老周", "秋一" }, seen.Senders);
+        Assert.True(outcome.Succeeded);
+        Assert.Equal("老周", outcome.Files[0].ChatName);
+        Assert.Contains("\"contact\":{\"id\":\"wx:老周\"", handler.Bodies[0]);
+        Assert.Contains("\"fromSelf\":true", handler.Bodies[1]);
+        Assert.Equal(new[] { "秋一" }, _rememberedNames);
+        Assert.Equal(2, handler.Bodies.Count);
+    }
+
+    [Fact]
+    public async Task ThreeUnknownSendersAskForTheGroupNameOnly()
+    {
+        var handler = new CapturingHandler(_ => Ok());
+        ChatNameRequest? seen = null;
+        await Delivery(handler).DeliverAsync(Batch("a.zip", "·甲\n2026年9月26日 16:58\na\n\n·乙\n2026年9月26日 16:59\nb\n\n·丙\n2026年9月26日 17:00\nc\n"), request =>
+        {
+            seen = request;
+            return Task.FromResult<ChatNameAnswer?>(new ChatNameAnswer("三人群", true));
+        });
+        Assert.False(seen!.MyNameUnknown);
+        Assert.Contains("wxg:三人群", handler.Bodies[0]);
+    }
+
+    [Fact]
     public async Task CancellingTheGroupNameKeepsTheBatchForRetry()
     {
         var batch = Batch("a.zip", "·张三\n2026年9月26日 15:30\n开会吗\n\n·李四\n2026年9月26日 15:31\n开\n");
@@ -133,7 +170,7 @@ public class LlmSocialDeliveryTests : IDisposable
         Assert.Equal(RecordStatus.Cancelled, outcome.Files[0].Status);
         Assert.Empty(handler.Bodies);
         Assert.True(Directory.Exists(Path.Combine(_inbox.Failed, batch.Id.Value)));
-        Assert.Contains("群名", BatchInbox.ReadOutcome(Path.Combine(_inbox.Failed, batch.Id.Value)));
+        Assert.Contains("重试", BatchInbox.ReadOutcome(Path.Combine(_inbox.Failed, batch.Id.Value)));
     }
 
     [Fact]

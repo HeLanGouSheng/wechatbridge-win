@@ -88,11 +88,25 @@ public sealed class DeliveryFlow
         return new LlmSocialDelivery(
             client,
             Settings.MyNames,
+            RememberMyName,
             new GroupMemoryStore(AppPaths.GroupsFile),
             new RecordsLog(AppPaths.RecordsFile),
             new BatchInbox(AppPaths.InboxRoot),
             TimeProvider.System,
             TimeZoneInfo.Local);
+    }
+
+    /// <summary>The user pointed at their own nickname in a chat: keep it, so later forwards know which side is theirs.</summary>
+    private static void RememberMyName(string name)
+    {
+        var store = Store;
+        var settings = store.Load();
+        if (settings.MyNames.Contains(name, StringComparer.Ordinal))
+        {
+            return;
+        }
+
+        store.Save(settings with { MyNames = settings.MyNames.Append(name).ToArray() });
     }
 
     public Task<BatchOutcome> DeliverAsync(ReadyBatch batch, Func<ChatNameRequest, Task<ChatNameAnswer?>> askChatName, CancellationToken ct = default) =>

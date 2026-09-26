@@ -7,10 +7,15 @@ using Bridge.Core.Records;
 
 namespace Bridge.Core.Delivery;
 
-/// <summary>Asked once per group chat whose name is neither in the batch nor remembered.</summary>
-public sealed record ChatNameRequest(string FileName, IReadOnlyList<string> Senders, int MessageCount);
+/// <summary>
+/// Asked when a transcript has two or more senders none of which is known to be the user. With exactly
+/// two senders (<see cref="MyNameUnknown"/>) the likelier story is a 1:1 chat where one of them is the
+/// user, so the question is "which one is you?" first, and only then "what is this group called?".
+/// </summary>
+public sealed record ChatNameRequest(string FileName, IReadOnlyList<string> Senders, int MessageCount, bool MyNameUnknown = false);
 
-public sealed record ChatNameAnswer(string ChatName, bool Remember);
+/// <summary>Either <see cref="MyName"/> (one of the senders is the user) or <see cref="ChatName"/> (it is a group).</summary>
+public sealed record ChatNameAnswer(string? ChatName, bool Remember, string? MyName = null);
 
 public sealed record FileOutcome(
     string FileName,
@@ -41,16 +46,20 @@ public sealed class LlmSocialDelivery
     public const string TargetName = "llmsocial";
 
     private readonly LlmSocialClient _client;
-    private readonly IReadOnlyCollection<string> _myNames;
+    private readonly List<string> _myNames;
+    private readonly Action<string> _rememberMyName;
     private readonly GroupMemoryStore _groups;
     private readonly RecordsLog _records;
     private readonly BatchInbox _inbox;
     private readonly TimeProvider _clock;
     private readonly TimeZoneInfo _timeZone;
 
+    /// <param name="rememberMyName">Called when the user points at their own nickname, so it is saved
+    /// for every later forward (the settings live outside Core).</param>
     public LlmSocialDelivery(
         LlmSocialClient client,
         IReadOnlyCollection<string> myNames,
+        Action<string> rememberMyName,
         GroupMemoryStore groups,
         RecordsLog records,
         BatchInbox inbox,
@@ -58,7 +67,8 @@ public sealed class LlmSocialDelivery
         TimeZoneInfo timeZone)
     {
         _client = client;
-        _myNames = myNames;
+        _myNames = myNames.ToList();
+        _rememberMyName = rememberMyName;
         _groups = groups;
         _records = records;
         _inbox = inbox;
@@ -118,34 +128,48 @@ public sealed class LlmSocialDelivery
         if (mapping.NeedsChatName)
         {
             var remembered = _groups.Match(mapping.OtherSenders);
-            if (remembered is null)
-            {
-                var answer = await askChatName(new ChatNameRequest(fileName, mapping.OtherSenders, transcript.Messages.Count));
-                if (answer is null || answer.ChatName.Trim().Length == 0)
-                {
-                    return new FileOutcome(fileName, null, transcript.Messages.Count, 0, RecordStatus.Cancelled, "没有填群名，这段群聊没有发送。在记录里可以重试。", false);
-                }
-
-                chatName = answer.ChatName.Trim();
-                if (answer.Remember)
-                {
-                    _groups.Remember(chatName, mapping.OtherSenders, _clock.GetUtcNow());
-                }
-            }
-            else
+            if (remembered is not null)
             {
                 chatName = remembered;
                 _groups.Remember(chatName, mapping.OtherSenders, _clock.GetUtcNow());
             }
+            else
+            {
+                // Two senders and neither is known to be the user: most likely a 1:1 chat with the user's own
+                // nickname not set yet (or changed), so ask that before asking for a group name.
+                var answer = await askChatName(new ChatNameRequest(fileName, mapping.OtherSenders, transcript.Messages.Count, MyNameUnknown: mapping.OtherSenders.Count == 2));
+                if (answer?.MyName is { } me && me.Trim().Length > 0 && mapping.OtherSenders.Contains(me.Trim(), StringComparer.Ordinal))
+                {
+                    var name = me.Trim();
+                    _myNames.Add(name);
+                    _rememberMyName(name);
+                }
+                else if (answer?.ChatName is { } group && group.Trim().Length > 0)
+                {
+                    chatName = group.Trim();
+                    if (answer.Remember)
+                    {
+                        _groups.Remember(chatName, mapping.OtherSenders, _clock.GetUtcNow());
+                    }
+                }
+                else
+                {
+                    return new FileOutcome(fileName, null, transcript.Messages.Count, 0, RecordStatus.Cancelled, "没有说明这是谁的聊天，这段记录没有发送。在记录里可以重试。", false);
+                }
+            }
 
             mapping = PayloadMapper.Map(transcript, chatName, _myNames, _timeZone);
+            if (mapping.NeedsChatName)
+            {
+                return new FileOutcome(fileName, null, transcript.Messages.Count, 0, RecordStatus.Cancelled, "没有填群名，这段群聊没有发送。在记录里可以重试。", false);
+            }
         }
 
-        var name = mapping.IsGroup ? chatName : (chatName ?? mapping.Counterpart);
+        var counterpart = mapping.IsGroup ? chatName : (chatName ?? mapping.Counterpart);
         if (mapping.Messages.Count == 0)
         {
             var why = mapping.OtherSenders.Count == 0 ? "这段记录里只有你自己的消息，没有对方的消息可发。" : "这段记录里没有可发的消息（正文都是空的）。";
-            return new FileOutcome(fileName, name, transcript.Messages.Count, 0, RecordStatus.Empty, why, false);
+            return new FileOutcome(fileName, counterpart, transcript.Messages.Count, 0, RecordStatus.Empty, why, false);
         }
 
         var delivery = await _client.DeliverAsync(mapping.Messages, ct);
@@ -155,16 +179,16 @@ public sealed class LlmSocialDelivery
         {
             var status = delivery.Sent == 0 ? RecordStatus.Failed : RecordStatus.Partial;
             var detail = delivery.Sent == 0 ? delivery.AbortReason! : $"发出 {delivery.Sent}/{mapping.Messages.Count} 条后中止：{delivery.AbortReason}";
-            return new FileOutcome(fileName, name, mapping.Messages.Count, delivery.Sent, status, detail, lastFromSelf);
+            return new FileOutcome(fileName, counterpart, mapping.Messages.Count, delivery.Sent, status, detail, lastFromSelf);
         }
 
         if (delivery.Failures.Count > 0)
         {
             var detail = $"发出 {delivery.Sent}/{mapping.Messages.Count} 条，{delivery.Failures.Count} 条被拒：{delivery.Failures[0].Error}{skippedNote}";
-            return new FileOutcome(fileName, name, mapping.Messages.Count, delivery.Sent, RecordStatus.Partial, detail, lastFromSelf);
+            return new FileOutcome(fileName, counterpart, mapping.Messages.Count, delivery.Sent, RecordStatus.Partial, detail, lastFromSelf);
         }
 
         var summary = $"已发 {delivery.Sent} 条给 llmsocial{skippedNote}" + (lastFromSelf ? "。最后一条是你发的，llmsocial 不会起草回复。" : "");
-        return new FileOutcome(fileName, name, mapping.Messages.Count, delivery.Sent, RecordStatus.Sent, summary, lastFromSelf);
+        return new FileOutcome(fileName, counterpart, mapping.Messages.Count, delivery.Sent, RecordStatus.Sent, summary, lastFromSelf);
     }
 }

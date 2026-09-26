@@ -1,0 +1,16 @@
+# build output
+bin/
+obj/
+dist/
+*.user
+*.suo
+.vs/
+TestResults/
+
+# signing material: the private key never enters git
+*.pfx
+*.pfx.pwd
+dev-cert.thumbprint
+
+# local scratch
+*.log

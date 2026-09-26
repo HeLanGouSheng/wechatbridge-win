@@ -33,6 +33,8 @@ Add-AppxPackage -Path '<发布目录>\ChatBridgeWin.msix' -ExternalLocation '<�
 
 ## 接 llmsocial
 
+最省事的路：在 llmsocial 里建账号（平台微信、连接方式通用 Webhook），卡片上点「安装聊天桥」——llmsocial 自己下载发布包、校验、解压到 `%LOCALAPPDATA%\Programs\WeChatBridge`，用 `--configure` 写好地址/账号/密钥（密钥走环境变量 `CHATBRIDGE_SECRET`），再 `--register`。下面是手动的做法。
+
 1. 在 llmsocial 的「账号」里新建一个账号：平台选**微信个人号**，连接方式选**通用 Webhook**，出站地址留空，填一个至少 24 个字符的共享密钥。记下账号卡片上 `acct_` 开头的账号 ID。
 2. 双击 `WeChatBridge.exe` 打开主窗口 → 「设置…」：llmsocial 地址（默认 `http://127.0.0.1:8788`，是 llmsocial 的**回调端口**，不是管理界面的 8787）、账号 ID、共享密钥、**我的昵称**（微信里你自己显示的昵称，一行一个；没填的话你发的消息会被当成对方的）。点「测试连接」看到「连接正常」再保存。
 3. 勾上「收到转发后直接发给 llmsocial」就是一键：微信里转发 → 窗口显示「已发给 llmsocial：N 条」→ 几秒后自己关掉。不勾的话每次先弹窗口，按「发给 llmsocial」或「复制到剪贴板」。
@@ -42,6 +44,7 @@ Add-AppxPackage -Path '<发布目录>\ChatBridgeWin.msix' -ExternalLocation '<�
 ```powershell
 WeChatBridge.exe --configure --account-id acct_… --secret … [--base-url http://127.0.0.1:8788] [--my-names 甲,乙] [--auto on] --quiet
 WeChatBridge.exe --test-connection
+WeChatBridge.exe --status --json                        # 给程序读的状态（注册、版本、连的账号；不含密钥）
 WeChatBridge.exe --send 某个导出.zip [--chat-name 群名]     # 不经微信、不弹窗口，直接发给 llmsocial
 ```
 
@@ -56,6 +59,14 @@ WeChatBridge.exe --send 某个导出.zip [--chat-name 群名]     # 不经微信
 | 消息 ID | 由「对话 + 发送者 + 分钟 + 正文 + 同分钟序号」哈希而来，所以同一段记录再转发一次，llmsocial 里不会多出一份 |
 
 已知限制：微信导出的记录里**只有昵称，没有用户 ID**，对方改了昵称就会成为 llmsocial 里的新联系人；只有你转发的消息才会进去；最后一条是你自己发的时候 llmsocial 不会起草回复（它把这当作「主人已经回了」）。
+
+## 发布包
+
+```powershell
+.\scripts\package-release.ps1        # publish + dist\WeChatBridge-win-x64.zip + .sha256
+```
+
+llmsocial 默认从 GitHub Release 的 `WeChatBridge-win-x64.zip` 下载（旁边要有 `.sha256`）；`LLMSOCIAL_WECHAT_BRIDGE_URL` 可以改成别的地址或本地路径。
 
 ## 不经微信测试
 

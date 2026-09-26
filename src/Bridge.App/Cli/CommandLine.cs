@@ -1,6 +1,8 @@
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.Json;
 using System.Windows;
 using Bridge.App.Delivery;
 using Bridge.App.Identity;
@@ -39,6 +41,7 @@ public static class CommandLine
             {
                 "--register" => Task.Run(() => Registration.RegisterAsync(log)).GetAwaiter().GetResult(),
                 "--unregister" => Task.Run(() => Registration.UnregisterAsync(log)).GetAwaiter().GetResult(),
+                "--status" when args.Contains("--json", StringComparer.Ordinal) => StatusJson(log),
                 "--status" => Registration.Status(log),
                 "--trust-cert" => Registration.TrustCertificate(log),
                 "--identity" => Identity(log),
@@ -67,6 +70,55 @@ public static class CommandLine
     private static int Identity(TextWriter log)
     {
         log.WriteLine(PackageIdentity.FullName() ?? "无身份");
+        return 0;
+    }
+
+    private static readonly JsonSerializerOptions JsonOptions = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
+    /// <summary>The same facts as --status, for programs (llmsocial's installer) rather than people. The
+    /// secret itself is never part of it.</summary>
+    private static int StatusJson(TextWriter log)
+    {
+        var info = Registration.Inspect();
+        object? settings = null;
+        string? settingsError = null;
+        try
+        {
+            var loaded = DeliveryFlow.Store.Load();
+            settings = new
+            {
+                configured = loaded.LlmSocial.IsFilledIn,
+                baseUrl = loaded.LlmSocial.BaseUrl,
+                accountId = loaded.LlmSocial.AccountId,
+                autoDeliver = loaded.LlmSocialMode,
+                myNames = loaded.MyNames,
+            };
+        }
+        catch (SettingsException ex)
+        {
+            settingsError = ex.Message;
+        }
+
+        var payload = new
+        {
+            version = typeof(CommandLine).Assembly.GetName().Version?.ToString(3),
+            installDirectory = info.InstallDirectory,
+            dataDirectory = info.DataDirectory,
+            identity = info.Identity,
+            packageFile = info.PackageFilePresent,
+            packageFileVersion = info.PackageFileVersion,
+            certificateFile = info.CertificateFilePresent,
+            certificateTrusted = info.CertificateTrusted,
+            registered = info.Registered,
+            packageFullName = info.PackageFullName,
+            packageVersion = info.PackageVersion,
+            externalLocation = info.ExternalLocation,
+            externalLocationMatches = info.ExternalLocationMatches,
+            registeredUpToDate = info.RegisteredUpToDate,
+            settings,
+            settingsError,
+        };
+        log.WriteLine(JsonSerializer.Serialize(payload, JsonOptions));
         return 0;
     }
 
@@ -108,7 +160,10 @@ public static class CommandLine
         var options = Options(args);
         var store = DeliveryFlow.Store;
         var current = store.Load();
-        var secret = options.TryGetValue("secret", out var s) ? s : TrySecret(store, current);
+        // llmsocial hands the secret over in the environment so it never shows up in a process listing.
+        var secret = options.TryGetValue("secret", out var s) ? s
+            : Environment.GetEnvironmentVariable("CHATBRIDGE_SECRET") is { Length: > 0 } fromEnv ? fromEnv
+            : TrySecret(store, current);
         var llm = current.LlmSocial with
         {
             BaseUrl = options.TryGetValue("base-url", out var url) ? url.Trim() : current.LlmSocial.BaseUrl,
@@ -232,11 +287,11 @@ public static class CommandLine
         log.WriteLine($"{BridgeIdentity.ProductName} {typeof(CommandLine).Assembly.GetName().Version}");
         log.WriteLine("  WeChatBridge.exe --register     注册到 Windows 共享目标（出现在微信「选择电脑中的应用」里）");
         log.WriteLine("  WeChatBridge.exe --unregister   解除注册");
-        log.WriteLine("  WeChatBridge.exe --status       身份、注册和证书状态");
+        log.WriteLine("  WeChatBridge.exe --status       身份、注册和证书状态（加 --json 给程序读）");
         log.WriteLine("  WeChatBridge.exe --identity     只打印本进程的包身份");
         log.WriteLine("  WeChatBridge.exe --trust-cert   （管理员）把自签证书放进这台电脑的「受信任人」；--register 会自动调用");
         log.WriteLine("  WeChatBridge.exe --configure --account-id acct_… --secret … [--base-url http://127.0.0.1:8788] [--my-names 甲,乙] [--auto on|off]");
-        log.WriteLine("                                  写 llmsocial 设置（给安装脚本用；没给的项保持不变）");
+        log.WriteLine("                                  写 llmsocial 设置（给安装脚本用；没给的项保持不变；密钥也可以放在环境变量 CHATBRIDGE_SECRET 里）");
         log.WriteLine("  WeChatBridge.exe --test-connection  用当前设置连一次 llmsocial");
         log.WriteLine("  WeChatBridge.exe --send <文件.zip> [--chat-name 群名]  把一个导出的压缩包发给 llmsocial");
         log.WriteLine("  WeChatBridge.exe <文件.zip>      不经微信，直接处理一个导出的压缩包（弹窗口）");

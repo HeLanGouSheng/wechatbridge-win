@@ -15,8 +15,8 @@ Windows 桌面程序：把微信「转发到其他应用」导出的聊天记录
 ## 结构
 
 - `src/Bridge.Core/` — 纯逻辑（net8.0）：`Transcripts`（聊天记录.txt 解析）、`Archives`（ZIP 安全读取）、`Naming`（文件名清洗、从 ZIP 名取群名）、`Batches`（staging → ready → done/failed 的批次目录）、`LlmSocial/`（签名、稳定消息 ID、单聊/群聊映射、HTTP 客户端）、`Delivery/`（一批从读 ZIP 到写记录、挪目录的全流程；剪贴板文本）、`Config/`（settings.json、`ISecretProtector`、群指纹记忆 groups.json）、`Records/`（records.jsonl，命名互斥追加）、`BridgeJson`（统一 JSON 方言，源生成；新类型要加进 `BridgeJsonContext`）。
-- `src/Bridge.App/` — WPF（net8.0-windows10.0.19041.0），程序集名 `WeChatBridge`：`Program` 入口分发；`LaunchMode` 检测共享激活；`Identity/` 身份检查与注册；`Cli/` `--register --unregister --status --identity --configure --test-connection --send --parse`；`Share/` 共享接收与本地导入；`Config/DpapiProtector` 密钥加密；`Delivery/DeliveryFlow` 读设置、建客户端（回环地址不走系统代理）、剪贴板；`Views/` 主窗口（记录 + 设置入口 + 注册）、结果窗口（自动投递时几秒后自关）、设置窗口、群名对话框。
-- `packaging/` — 外部位置包清单与图标。`scripts/build-package.ps1` 造证书 + 打包 + 签名；`scripts/publish.ps1` 发布 + 打包 + 拷贝到发布目录。**ps1 只写 ASCII**（PowerShell 5.1 把无 BOM 的脚本当 ANSI）。
+- `src/Bridge.App/` — WPF（net8.0-windows10.0.19041.0），程序集名 `WeChatBridge`：`Program` 入口分发；`LaunchMode` 检测共享激活；`Identity/` 身份检查与注册；`Cli/` `--register --unregister --status [--json] --identity --configure --test-connection --send --parse`（`--configure` 的密钥可来自环境变量 `CHATBRIDGE_SECRET`；`--status --json` 是 llmsocial 安装器读的契约，改字段要同步 llmsocial 的 `src/server/bridge/wechatBridge.ts`）；`Share/` 共享接收与本地导入；`Config/DpapiProtector` 密钥加密；`Delivery/DeliveryFlow` 读设置、建客户端（回环地址不走系统代理）、剪贴板；`Views/` 主窗口（记录 + 设置入口 + 注册）、结果窗口（自动投递时几秒后自关）、设置窗口、群名对话框。
+- `packaging/` — 外部位置包清单与图标。`scripts/build-package.ps1` 造证书 + 打包 + 签名；`scripts/publish.ps1` 发布 + 打包 + 拷贝到发布目录；`scripts/package-release.ps1` 再打成 `dist/WeChatBridge-win-x64.zip` + `.sha256`（bsdtar，只装运行需要的文件）。**ps1 只写 ASCII**（PowerShell 5.1 把无 BOM 的脚本当 ANSI）。
 - `tests/Bridge.Core.Tests/` — xunit。
 
 ## 微信那边的机制（2026-09-26 在微信 4.1.15.13 / Windows 11 25H2 上逐条验证）
@@ -43,6 +43,10 @@ Windows 桌面程序：把微信「转发到其他应用」导出的聊天记录
 - 微信导出里没有群名也没有用户 ID：群聊第一次问人（`ChatNameDialog` / CLI `--chat-name`），之后 `GroupFingerprint` 按发言人集合认（≥2 人、重合 ≥0.7、平手算不认）；单聊用对方昵称当联系人 ID，改昵称 = 新联系人，这是已知限制，写在 README。
 - 投递失败的批次留在 `inboxailed\`，主窗口「重试所选」`Requeue` 回 ready 再走一遍；重发已送达的消息是安全的（llmsocial 去重）。`records.jsonl` 一批一个文件一行，多个共享进程同时写靠 `Local\ChatBridge.records` 互斥。
 - 本机验证不用真号：起一个临时 llmsocial（`LLMSOCIAL_PORT=8799 LLMSOCIAL_WEBHOOK_PORT=8798 LLMSOCIAL_DATA_DIR=<临时目录> node src/server/index.ts`），管理 API 要 `X-LLMSocial: 1` 头 + 登录 cookie，带中文的请求体用 `--data-binary @文件`（Git Bash 里 `-d '中文'` 会让 Content-Length 对不上）；它自带的 Mock 模型会起草回复，不花钱。
+
+## 和 llmsocial 的关系
+
+llmsocial 的账号卡片「安装聊天桥」= 下载发布包（默认 GitHub Release，可设本地路径）→ 校验 SHA-256 → bsdtar 解压到 `%LOCALAPPDATA%\Programs\WeChatBridge` → `--configure --base-url http://127.0.0.1:<回调端口> --account-id … --auto on`（密钥在环境变量）→ 若 `--status --json` 的 `registeredUpToDate` 不为真则 `--register`。注册绑定目录，所以从发布目录换到 Programs 目录会把注册挪过去，这是预期行为。一台电脑上的聊天桥同时只连一个账号。
 
 ## 日常命令
 

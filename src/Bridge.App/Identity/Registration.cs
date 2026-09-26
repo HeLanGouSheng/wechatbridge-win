@@ -186,21 +186,51 @@ public static class Registration
         return removed;
     }
 
-    public static int Status(TextWriter log)
+    /// <summary>Everything --status reports, as data: the text and the --json forms both come from here.</summary>
+    public sealed record RegistrationInfo(
+        string InstallDirectory,
+        string DataDirectory,
+        string? Identity,
+        bool PackageFilePresent,
+        string? PackageFileVersion,
+        bool CertificateFilePresent,
+        string? CertificateSubject,
+        bool? CertificateTrusted,
+        bool Registered,
+        string? PackageFullName,
+        string? PackageVersion,
+        string? ExternalLocation,
+        bool ExternalLocationMatches)
     {
-        log.WriteLine($"程序目录：{AppPaths.InstallDirectory}");
-        log.WriteLine($"数据目录：{AppPaths.DataRoot}");
-        log.WriteLine($"本进程身份：{PackageIdentity.FullName() ?? "无（不是从注册过的目录启动，或还没注册）"}");
-        log.WriteLine($"msix：{(File.Exists(PackagePath) ? "在" : "缺失")}    证书：{(File.Exists(CertificatePath) ? "在" : "缺失")}");
+        /// <summary>Registered from this very folder with the package version that sits in it: nothing to redo.</summary>
+        public bool RegisteredUpToDate =>
+            Registered && ExternalLocationMatches && (PackageFileVersion is null || string.Equals(PackageFileVersion, PackageVersion, StringComparison.Ordinal));
+    }
 
+    public static RegistrationInfo Inspect()
+    {
+        string? subject = null;
+        bool? trusted = null;
         if (File.Exists(CertificatePath))
         {
-            var cert = new X509Certificate2(CertificatePath);
-            log.WriteLine($"证书 {cert.Subject}（{cert.Thumbprint[..8]}…）{(IsTrusted(cert) ? "已在这台电脑的「受信任人」里" : "还没导入这台电脑的「受信任人」（--register 会做，需要管理员确认一次）")}");
+            try
+            {
+                var cert = new X509Certificate2(CertificatePath);
+                subject = cert.Subject;
+                trusted = IsTrusted(cert);
+            }
+            catch (System.Security.Cryptography.CryptographicException)
+            {
+                // A damaged .cer: reported as present but untrusted, --register will say what to do.
+            }
         }
 
+        var registered = false;
+        string? fullName = null;
+        string? version = null;
+        string? external = null;
+        var matches = false;
         var manager = new PackageManager();
-        var any = false;
         foreach (var package in manager.FindPackagesForUser(string.Empty))
         {
             if (!string.Equals(package.Id.Name, BridgeIdentity.PackageName, StringComparison.OrdinalIgnoreCase))
@@ -208,19 +238,81 @@ public static class Registration
                 continue;
             }
 
-            any = true;
-            var external = package.EffectiveExternalPath;
-            var matches = string.Equals(Path.TrimEndingDirectorySeparator(external), Path.TrimEndingDirectorySeparator(AppPaths.InstallDirectory), StringComparison.OrdinalIgnoreCase);
-            log.WriteLine($"已注册：{package.Id.FullName}");
-            log.WriteLine($"  注册的外部位置：{external}{(matches ? "" : "  ← 和程序目录不一样！程序目录移动过，重新运行 --register")}");
+            registered = true;
+            fullName = package.Id.FullName;
+            var v = package.Id.Version;
+            version = $"{v.Major}.{v.Minor}.{v.Build}.{v.Revision}";
+            external = package.EffectiveExternalPath;
+            matches = string.Equals(Path.TrimEndingDirectorySeparator(external), Path.TrimEndingDirectorySeparator(AppPaths.InstallDirectory), StringComparison.OrdinalIgnoreCase);
         }
 
-        if (!any)
+        var packagePresent = File.Exists(PackagePath);
+        return new RegistrationInfo(
+            AppPaths.InstallDirectory,
+            AppPaths.DataRoot,
+            PackageIdentity.FullName(),
+            packagePresent,
+            packagePresent ? PackageFileVersion(PackagePath) : null,
+            File.Exists(CertificatePath),
+            subject,
+            trusted,
+            registered,
+            fullName,
+            version,
+            external,
+            matches);
+    }
+
+    public static int Status(TextWriter log)
+    {
+        var info = Inspect();
+        log.WriteLine($"程序目录：{info.InstallDirectory}");
+        log.WriteLine($"数据目录：{info.DataDirectory}");
+        log.WriteLine($"本进程身份：{info.Identity ?? "无（不是从注册过的目录启动，或还没注册）"}");
+        log.WriteLine($"msix：{(info.PackageFilePresent ? $"在（{info.PackageFileVersion ?? "版本读不出"}）" : "缺失")}    证书：{(info.CertificateFilePresent ? "在" : "缺失")}");
+
+        if (info.CertificateSubject is not null)
+        {
+            log.WriteLine($"证书 {info.CertificateSubject} {(info.CertificateTrusted == true ? "已在这台电脑的「受信任人」里" : "还没导入这台电脑的「受信任人」（--register 会做，需要管理员确认一次）")}");
+        }
+
+        if (info.Registered)
+        {
+            log.WriteLine($"已注册：{info.PackageFullName}");
+            log.WriteLine($"  注册的外部位置：{info.ExternalLocation}{(info.ExternalLocationMatches ? "" : "  ← 和程序目录不一样！程序目录移动过，重新运行 --register")}");
+            if (info.ExternalLocationMatches && !info.RegisteredUpToDate)
+            {
+                log.WriteLine($"  注册的是 {info.PackageVersion}，目录里的 msix 是 {info.PackageFileVersion}：重新运行 --register");
+            }
+        }
+        else
         {
             log.WriteLine("未注册：运行 WeChatBridge.exe --register");
         }
 
         return 0;
+    }
+
+    /// <summary>The Version attribute of the manifest inside the msix; null when it cannot be read.</summary>
+    private static string? PackageFileVersion(string msixPath)
+    {
+        try
+        {
+            using var zip = ZipFile.OpenRead(msixPath);
+            var entry = zip.GetEntry("AppxManifest.xml");
+            if (entry is null)
+            {
+                return null;
+            }
+
+            using var stream = entry.Open();
+            XNamespace ns = "http://schemas.microsoft.com/appx/manifest/foundation/windows10";
+            return XDocument.Load(stream).Root?.Element(ns + "Identity")?.Attribute("Version")?.Value;
+        }
+        catch (Exception ex) when (ex is InvalidDataException or System.Xml.XmlException)
+        {
+            return null;
+        }
     }
 
     /// <summary>

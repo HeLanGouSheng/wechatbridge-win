@@ -25,7 +25,9 @@ Windows 桌面程序：把微信「转发到其他应用」导出的聊天记录
 - `GetCurrentPackageFullName` 返回 15700 = 无身份；不是「返回 0」。
 - 同版本重复注册用 `ForceUpdateFromAnyVersion`；**别默认先删包再注册**——`--register` 进程自己可能带身份，删包会杀掉自己。
 - 每次共享激活起一个新进程；**不要加单实例互斥退出第二个进程**，否则转发静默丢失。
-- 自签证书导入 `CurrentUser\TrustedPeople` 即可注册，不需要管理员。
+- 自签证书必须进 **`LocalMachine\TrustedPeople`**（当前用户那份不算，实测 0x800B0109）——`--register` 自我提权跑一次 `--trust-cert`。
+- 包的图标由 Windows 从**外部位置（exe 所在目录）的 `Assets\`** 解析，不是从 msix；缺了会让 `AppListEntry.DisplayInfo.GetLogo` 抛 0x80070490，微信的「选择电脑中的应用」会把拿不到图标的应用整个丢掉（系统分享面板只是显示空白图标）。`publish.ps1` 负责拷贝。
+- 同版本、内容不同的包不能重复注册（0x80073CF9）：`build-package.ps1` 每次构建换版本号；带身份的进程绝不替自己解除注册（会把自己杀掉，留下未注册状态）。
 - WPF 原生 DLL 放 exe 旁边（`IncludeNativeLibrariesForSelfExtract=false`），不压缩单文件：共享代理在等，启动要快。
 - llmsocial 的 webhook：签名 hex **小写**、`timestamp` **毫秒**、重复 `messageId` 返回 200、`fromSelf` 消息会作废 AI 草稿。
 

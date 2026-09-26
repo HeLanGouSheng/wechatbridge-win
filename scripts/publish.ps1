@@ -34,6 +34,12 @@ $dist = Join-Path $root "dist"
 Copy-Item (Join-Path $dist "WeChatBridgeWin.msix") $publishDir -Force
 Copy-Item (Join-Path $dist "WeChatBridgeWin.cer") $publishDir -Force
 
+# Windows resolves a package-with-external-location's logos from the external location (the app folder),
+# not from the msix. Without them AppListEntry.DisplayInfo.GetLogo throws 0x80070490 and WeChat drops the
+# entry from its list (the system share pane merely shows a blank icon).
+New-Item -ItemType Directory -Force -Path (Join-Path $publishDir "Assets") | Out-Null
+Copy-Item (Join-Path $root "packaging\Assets\*.png") (Join-Path $publishDir "Assets") -Force
+
 # Sign the exe with the same certificate so its publisher matches the package (no SmartScreen benefit, but consistent).
 $kits = "C:\Program Files (x86)\Windows Kits\10\bin\10.0.19041.0\x64"
 $password = if ($env:BRIDGE_PFX_PASSWORD) { $env:BRIDGE_PFX_PASSWORD } else { "wechatbridge-dev" }

@@ -16,6 +16,7 @@ public partial class ResultWindow : Window
     {
         _batch = batch;
         InitializeComponent();
+        Title = Bridge.Core.BridgeIdentity.ProductName;
         Load();
     }
 

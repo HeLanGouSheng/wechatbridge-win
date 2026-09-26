@@ -11,9 +11,9 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <TextBlock Grid.Row="0" FontSize="18" FontWeight="SemiBold" Text="微信桥" />
+        <TextBlock x:Name="Heading" Grid.Row="0" FontSize="18" FontWeight="SemiBold" />
         <TextBlock Grid.Row="1" Margin="0,4,0,12" Foreground="#666" TextWrapping="Wrap"
-                   Text="微信里多选消息 → 转发 → 转发到其他应用 → 选择电脑中的应用 → 微信桥。也可以把微信导出的 ZIP 拖进这个窗口。" />
+                   Text="微信里多选消息 → 转发 → 转发到其他应用 → 选择电脑中的应用 → 选本程序。也可以把微信导出的 ZIP 拖进这个窗口。" />
 
         <TextBox x:Name="StatusText" Grid.Row="2" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
                  FontFamily="Consolas, Microsoft YaHei UI" Background="#FAFAFA" BorderBrush="#DDD" Padding="8" />

@@ -14,6 +14,8 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        Title = Bridge.Core.BridgeIdentity.ProductName;
+        Heading.Text = Bridge.Core.BridgeIdentity.ProductName;
         RefreshStatus();
     }
 

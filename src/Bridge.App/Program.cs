@@ -13,6 +13,13 @@ public static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        Diagnostics.CrashLog.Install();
+        if (args.Length > 0 && args[0] == "--diag")
+        {
+            var path = Diagnostics.CrashLog.Write(null, "diag");
+            return path is null ? 1 : 0;
+        }
+
         if (args.Length > 0 && args[0].StartsWith("--", StringComparison.Ordinal))
         {
             return CommandLine.Run(args);

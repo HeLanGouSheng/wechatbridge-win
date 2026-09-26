@@ -1,8 +1,10 @@
 using System.Windows;
+using Bridge.App.Delivery;
 using Bridge.App.Share;
 using Bridge.App.Views;
 using Bridge.Core;
 using Bridge.Core.Batches;
+using Bridge.Core.Config;
 
 namespace Bridge.App;
 
@@ -36,10 +38,16 @@ public partial class App : Application
                 _ => null,
             };
 
-            Window window = batch is null ? new MainWindow() : new ResultWindow(batch);
-            window.Closed += (_, _) => Shutdown();
-            window.Show();
-            window.Activate();
+            if (batch is null)
+            {
+                var main = new MainWindow();
+                main.Closed += (_, _) => Shutdown();
+                main.Show();
+                main.Activate();
+                return;
+            }
+
+            await ShowBatchAsync(batch, closeAppWhenDone: true);
         }
         catch (ShareIntakeException ex)
         {
@@ -50,6 +58,36 @@ public partial class App : Application
         {
             MessageBox.Show($"出错了：{ex.Message}", BridgeIdentity.ProductName, MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown(1);
+        }
+    }
+
+    /// <summary>Shows a received batch; in llmsocial mode it is delivered while the window is up.
+    /// The returned task completes when delivery (if any) has finished, not when the window closes.</summary>
+    public static async Task ShowBatchAsync(ReadyBatch batch, bool closeAppWhenDone)
+    {
+        DeliveryFlow flow;
+        string? settingsProblem = null;
+        try
+        {
+            flow = DeliveryFlow.Load();
+        }
+        catch (SettingsException ex)
+        {
+            settingsProblem = ex.Message;
+            flow = DeliveryFlow.Unconfigured(ex.Message);
+        }
+
+        var window = new ResultWindow(batch, flow, settingsProblem);
+        if (closeAppWhenDone)
+        {
+            window.Closed += (_, _) => Current.Shutdown();
+        }
+
+        window.Show();
+        window.Activate();
+        if (flow.AutoDeliver)
+        {
+            await window.DeliverAutomaticallyAsync();
         }
     }
 }

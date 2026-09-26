@@ -25,7 +25,7 @@ public static class ShareIntake
 
         if (!operation.Data.Contains(StandardDataFormats.StorageItems))
         {
-            return Fail(operation, null, "微信桥只接收文件。请在微信里多选消息 → 转发 → 转发到其他应用。");
+            return Fail(operation, null, $"{Bridge.Core.BridgeIdentity.ProductName}只接收文件。请在微信里多选消息 → 转发 → 转发到其他应用。");
         }
 
         var items = await operation.Data.GetStorageItemsAsync();
@@ -43,7 +43,7 @@ public static class ShareIntake
 
                 if (!file.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
                 {
-                    return Fail(operation, staging, $"微信桥只接收微信导出的 ZIP，收到的是「{file.Name}」。");
+                    return Fail(operation, staging, $"{Bridge.Core.BridgeIdentity.ProductName}只接收微信导出的 ZIP，收到的是「{file.Name}」。");
                 }
 
                 await CopyAsync(file, staging.Reserve(file.Name, "zip"));
@@ -77,7 +77,7 @@ public static class ShareIntake
         catch (Exception ex)
         {
             staging.Abort();
-            operation.ReportError($"微信桥没能接住这次转发：{ex.Message}");
+            operation.ReportError($"{Bridge.Core.BridgeIdentity.ProductName}没能接住这次转发：{ex.Message}");
             throw new ShareIntakeException($"没能接住这次转发：{ex.Message}", ex);
         }
     }

@@ -14,8 +14,8 @@ Windows 桌面程序：把微信「转发到其他应用」导出的聊天记录
 
 ## 结构
 
-- `src/Bridge.Core/` — 纯逻辑（net8.0）：`Transcripts`（聊天记录.txt 解析）、`Archives`（ZIP 安全读取）、`Naming`（文件名清洗、从 ZIP 名取群名）、`Batches`（staging → ready → done/failed 的批次目录）、`BridgeJson`（统一 JSON 方言，源生成）。
-- `src/Bridge.App/` — WPF（net8.0-windows10.0.19041.0），程序集名 `WeChatBridge`：`Program` 入口分发；`LaunchMode` 检测共享激活；`Identity/` 身份检查与注册；`Cli/` `--register --unregister --status --identity`；`Share/` 共享接收与本地导入；`Views/` 窗口。
+- `src/Bridge.Core/` — 纯逻辑（net8.0）：`Transcripts`（聊天记录.txt 解析）、`Archives`（ZIP 安全读取）、`Naming`（文件名清洗、从 ZIP 名取群名）、`Batches`（staging → ready → done/failed 的批次目录）、`LlmSocial/`（签名、稳定消息 ID、单聊/群聊映射、HTTP 客户端）、`Delivery/`（一批从读 ZIP 到写记录、挪目录的全流程；剪贴板文本）、`Config/`（settings.json、`ISecretProtector`、群指纹记忆 groups.json）、`Records/`（records.jsonl，命名互斥追加）、`BridgeJson`（统一 JSON 方言，源生成；新类型要加进 `BridgeJsonContext`）。
+- `src/Bridge.App/` — WPF（net8.0-windows10.0.19041.0），程序集名 `WeChatBridge`：`Program` 入口分发；`LaunchMode` 检测共享激活；`Identity/` 身份检查与注册；`Cli/` `--register --unregister --status --identity --configure --test-connection --send --parse`；`Share/` 共享接收与本地导入；`Config/DpapiProtector` 密钥加密；`Delivery/DeliveryFlow` 读设置、建客户端（回环地址不走系统代理）、剪贴板；`Views/` 主窗口（记录 + 设置入口 + 注册）、结果窗口（自动投递时几秒后自关）、设置窗口、群名对话框。
 - `packaging/` — 外部位置包清单与图标。`scripts/build-package.ps1` 造证书 + 打包 + 签名；`scripts/publish.ps1` 发布 + 打包 + 拷贝到发布目录。**ps1 只写 ASCII**（PowerShell 5.1 把无 BOM 的脚本当 ANSI）。
 - `tests/Bridge.Core.Tests/` — xunit。
 
@@ -39,7 +39,10 @@ Windows 桌面程序：把微信「转发到其他应用」导出的聊天记录
 - 包的图标由 Windows 从**外部位置（exe 所在目录）的 `Assets\`** 解析，不是从 msix；缺了会让 `AppListEntry.DisplayInfo.GetLogo` 抛 0x80070490，微信的「选择电脑中的应用」会把拿不到图标的应用整个丢掉（系统分享面板只是显示空白图标）。`publish.ps1` 负责拷贝。
 - 同版本、内容不同的包不能重复注册（0x80073CF9）：`build-package.ps1` 每次构建换版本号；带身份的进程绝不替自己解除注册（会把自己杀掉，留下未注册状态）。注册过之后 `--register` 进程自己就带身份，Windows 拒绝更新「使用中」的包，排队更新也不会生效——所以带身份时把更新交给一个在本进程退出后运行的 PowerShell `Add-AppxPackage -ExternalLocation … -ForceUpdateFromAnyVersion -ForceTargetApplicationShutdown`（微信注册自己的包也这么做）。开发期直接用这条 PowerShell 最省事。
 - WPF 原生 DLL 放 exe 旁边（`IncludeNativeLibrariesForSelfExtract=false`），不压缩单文件：共享代理在等，启动要快。
-- llmsocial 的 webhook：签名 hex **小写**、`timestamp` **毫秒**、重复 `messageId` 返回 200、`fromSelf` 消息会作废 AI 草稿。
+- llmsocial 的 webhook：签名 hex **小写**、对**实际发送的字节**签名、`timestamp` **毫秒**、重复 `messageId` 返回 200（去重靠我们的 `MessageIds.Stable`，同一段记录再转发不会多一份）、`fromSelf` 消息存成我方已发且会作废 AI 草稿。空体的签名 POST 返回 400 = 密钥和账号都对，「测试连接」就靠这个，不会写进任何数据。
+- 微信导出里没有群名也没有用户 ID：群聊第一次问人（`ChatNameDialog` / CLI `--chat-name`），之后 `GroupFingerprint` 按发言人集合认（≥2 人、重合 ≥0.7、平手算不认）；单聊用对方昵称当联系人 ID，改昵称 = 新联系人，这是已知限制，写在 README。
+- 投递失败的批次留在 `inboxailed\`，主窗口「重试所选」`Requeue` 回 ready 再走一遍；重发已送达的消息是安全的（llmsocial 去重）。`records.jsonl` 一批一个文件一行，多个共享进程同时写靠 `Local\ChatBridge.records` 互斥。
+- 本机验证不用真号：起一个临时 llmsocial（`LLMSOCIAL_PORT=8799 LLMSOCIAL_WEBHOOK_PORT=8798 LLMSOCIAL_DATA_DIR=<临时目录> node src/server/index.ts`），管理 API 要 `X-LLMSocial: 1` 头 + 登录 cookie，带中文的请求体用 `--data-binary @文件`（Git Bash 里 `-d '中文'` 会让 Content-Length 对不上）；它自带的 Mock 模型会起草回复，不花钱。
 
 ## 日常命令
 
@@ -48,7 +51,8 @@ dotnet test                                   # Core 全部测试
 .\scripts\publish.ps1                         # 发布 + 打包 + 签名
 <发布目录>\WeChatBridge.exe --register        # 注册到微信菜单
 <发布目录>\WeChatBridge.exe --status          # 看身份/注册/证书
-<发布目录>\WeChatBridge.exe 某个导出.zip       # 不经微信测流程
+<发布目录>\WeChatBridge.exe 某个导出.zip       # 不经微信测流程（弹窗口）
+<发布目录>\WeChatBridge.exe --send 某个导出.zip [--chat-name 群名]   # 不经微信、不弹窗，直接发 llmsocial
 ```
 
 无 .NET SDK 时用 `%LOCALAPPDATA%\Microsoft\dotnet\dotnet.exe`（dotnet-install.ps1 装的每用户版）。

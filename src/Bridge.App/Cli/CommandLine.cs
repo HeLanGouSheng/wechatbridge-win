@@ -2,8 +2,14 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
+using Bridge.App.Delivery;
 using Bridge.App.Identity;
+using Bridge.App.Share;
 using Bridge.Core;
+using Bridge.Core.Batches;
+using Bridge.Core.Config;
+using Bridge.Core.Delivery;
+using Bridge.Core.LlmSocial;
 
 namespace Bridge.App.Cli;
 
@@ -37,6 +43,9 @@ public static class CommandLine
                 "--trust-cert" => Registration.TrustCertificate(log),
                 "--identity" => Identity(log),
                 "--parse" when args.Length > 1 => Parse(args[1], log),
+                "--configure" => Configure(args, log),
+                "--test-connection" => Task.Run(() => TestConnectionAsync(log)).GetAwaiter().GetResult(),
+                "--send" when args.Length > 1 => Task.Run(() => SendAsync(args, log)).GetAwaiter().GetResult(),
                 "--help" or "-h" or "/?" => Help(log),
                 _ => Unknown(args[0], log),
             };
@@ -92,6 +101,132 @@ public static class CommandLine
         }
     }
 
+    /// <summary><c>--configure --account-id … --secret … [--base-url …] [--my-names 甲,乙] [--auto on|off]</c>:
+    /// what llmsocial's installer runs; options left out keep their current value.</summary>
+    private static int Configure(string[] args, TextWriter log)
+    {
+        var options = Options(args);
+        var store = DeliveryFlow.Store;
+        var current = store.Load();
+        var secret = options.TryGetValue("secret", out var s) ? s : TrySecret(store, current);
+        var llm = current.LlmSocial with
+        {
+            BaseUrl = options.TryGetValue("base-url", out var url) ? url.Trim() : current.LlmSocial.BaseUrl,
+            AccountId = options.TryGetValue("account-id", out var acct) ? acct.Trim() : current.LlmSocial.AccountId,
+        };
+        var names = options.TryGetValue("my-names", out var raw)
+            ? raw.Split(new[] { ',', '，', '、', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.Ordinal).ToArray()
+            : current.MyNames;
+        var auto = options.TryGetValue("auto", out var a) ? a is "on" or "true" or "1" : current.LlmSocialMode;
+
+        var problem = LlmSocialConfig.Validate(llm.BaseUrl, llm.AccountId, secret);
+        if (problem is not null)
+        {
+            log.WriteLine(problem);
+            return 1;
+        }
+
+        var settings = current with { LlmSocial = llm, MyNames = names, LlmSocialMode = auto };
+        store.Save(store.WithSecret(settings, secret));
+        log.WriteLine($"已保存到 {store.Path}");
+        log.WriteLine($"  llmsocial 地址：{llm.BaseUrl}");
+        log.WriteLine($"  账号 ID：{llm.AccountId}");
+        log.WriteLine($"  我的昵称：{(names.Count == 0 ? "（未填）" : string.Join("、", names))}");
+        log.WriteLine($"  收到转发后直接发送：{(auto ? "开" : "关")}");
+        return 0;
+    }
+
+    private static string TrySecret(SettingsStore store, Settings settings)
+    {
+        try
+        {
+            return store.Secret(settings);
+        }
+        catch (SettingsException)
+        {
+            return "";
+        }
+    }
+
+    private static async Task<int> TestConnectionAsync(TextWriter log)
+    {
+        var flow = DeliveryFlow.Load();
+        if (!flow.LlmSocialReady)
+        {
+            log.WriteLine(flow.LlmSocialProblem);
+            return 1;
+        }
+
+        var client = new LlmSocialClient(DeliveryFlow.CreateHttpClient(flow.Config.BaseUrl), flow.Config);
+        var result = await client.TestAsync();
+        log.WriteLine(result.Detail);
+        return result.Ok ? 0 : 1;
+    }
+
+    /// <summary><c>--send 文件.zip [--chat-name 群名]</c>: the whole llmsocial path without WeChat or a window.</summary>
+    private static async Task<int> SendAsync(string[] args, TextWriter log)
+    {
+        var zipPath = args[1];
+        if (!File.Exists(zipPath))
+        {
+            log.WriteLine($"找不到文件 {zipPath}");
+            return 1;
+        }
+
+        var flow = DeliveryFlow.Load();
+        if (!flow.LlmSocialReady)
+        {
+            log.WriteLine(flow.LlmSocialProblem);
+            return 1;
+        }
+
+        var options = Options(args.Skip(1).ToArray());
+        options.TryGetValue("chat-name", out var chatName);
+        var batch = LocalIntake.Import(zipPath, new BatchInbox(AppPaths.InboxRoot), TimeProvider.System);
+        var outcome = await flow.DeliverAsync(batch, request =>
+        {
+            if (chatName is null)
+            {
+                log.WriteLine($"这是群聊（{string.Join("、", request.Senders)}），需要加 --chat-name 群名");
+                return Task.FromResult<ChatNameAnswer?>(null);
+            }
+
+            return Task.FromResult<ChatNameAnswer?>(new ChatNameAnswer(chatName, true));
+        });
+
+        log.WriteLine($"批次 {batch.Id.Value}");
+        foreach (var file in outcome.Files)
+        {
+            log.WriteLine($"  {file.FileName}：{file.Status}，{file.Detail}");
+        }
+
+        return outcome.Succeeded ? 0 : 1;
+    }
+
+    private static Dictionary<string, string> Options(string[] args)
+    {
+        var options = new Dictionary<string, string>(StringComparer.Ordinal);
+        for (var i = 1; i < args.Length; i++)
+        {
+            if (!args[i].StartsWith("--", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var key = args[i][2..];
+            if (i + 1 < args.Length && !args[i + 1].StartsWith("--", StringComparison.Ordinal))
+            {
+                options[key] = args[++i];
+            }
+            else
+            {
+                options[key] = "";
+            }
+        }
+
+        return options;
+    }
+
     private static int Help(TextWriter log)
     {
         log.WriteLine($"{BridgeIdentity.ProductName} {typeof(CommandLine).Assembly.GetName().Version}");
@@ -100,7 +235,11 @@ public static class CommandLine
         log.WriteLine("  WeChatBridge.exe --status       身份、注册和证书状态");
         log.WriteLine("  WeChatBridge.exe --identity     只打印本进程的包身份");
         log.WriteLine("  WeChatBridge.exe --trust-cert   （管理员）把自签证书放进这台电脑的「受信任人」；--register 会自动调用");
-        log.WriteLine("  WeChatBridge.exe <文件.zip>      不经微信，直接处理一个导出的压缩包");
+        log.WriteLine("  WeChatBridge.exe --configure --account-id acct_… --secret … [--base-url http://127.0.0.1:8788] [--my-names 甲,乙] [--auto on|off]");
+        log.WriteLine("                                  写 llmsocial 设置（给安装脚本用；没给的项保持不变）");
+        log.WriteLine("  WeChatBridge.exe --test-connection  用当前设置连一次 llmsocial");
+        log.WriteLine("  WeChatBridge.exe --send <文件.zip> [--chat-name 群名]  把一个导出的压缩包发给 llmsocial");
+        log.WriteLine("  WeChatBridge.exe <文件.zip>      不经微信，直接处理一个导出的压缩包（弹窗口）");
         log.WriteLine("  WeChatBridge.exe --parse <文件.zip>  只解析、打印消息，不进收件箱");
         log.WriteLine("  加 --quiet 不弹结果窗口（给安装脚本用）");
         return 0;

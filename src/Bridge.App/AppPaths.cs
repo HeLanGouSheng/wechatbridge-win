@@ -15,6 +15,8 @@ public static class AppPaths
 
     public static string RecordsFile => Path.Combine(DataRoot, "records.jsonl");
 
+    public static string GroupsFile => Path.Combine(DataRoot, "groups.json");
+
     public static string LogsDirectory => Path.Combine(DataRoot, "logs");
 
     /// <summary>The folder the exe runs from. Single-file publish leaves Assembly.Location empty, so this

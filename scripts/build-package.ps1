@@ -9,12 +9,22 @@
 
 [CmdletBinding()]
 param(
-    [string]$Version = "0.1.0.0",
+    [string]$Version = "",
     [switch]$AnyFileType,
     [string]$OutDir = "dist"
 )
 
 $ErrorActionPreference = "Stop"
+
+# A package version that changes with every build: Windows refuses to re-register the same version with
+# different content (0x80073CF9), and the dev loop rebuilds many times a day. Build = days since
+# 2026-01-01, Revision = two-minute slot of the day; both fit the 16-bit fields for years.
+if ($Version -eq "") {
+    $now = Get-Date
+    $days = [int]($now.Date - (Get-Date "2026-01-01")).TotalDays
+    $slot = [int]([math]::Floor(($now.Hour * 60 + $now.Minute) / 2))
+    $Version = "0.1.$days.$slot"
+}
 $root = Split-Path -Parent $PSScriptRoot
 $kits = "C:\Program Files (x86)\Windows Kits\10\bin\10.0.19041.0\x64"
 $makeappx = Join-Path $kits "makeappx.exe"
@@ -35,7 +45,8 @@ $manifestPath = Join-Path $root "packaging\AppxManifest.xml"
 $manifest = [System.IO.File]::ReadAllText($manifestPath, $utf8)
 $manifest = $manifest.Replace("__VERSION__", $Version)
 if ($AnyFileType) {
-    $manifest = $manifest.Replace("<!--__ANYFILE__-->", "<uap:SupportsAnyFileType />")
+    # The schema allows either a FileType list or SupportsAnyFileType, never both.
+    $manifest = [regex]::Replace($manifest, '(?s)<uap:SupportedFileTypes>.*?</uap:SupportedFileTypes>', '<uap:SupportedFileTypes><uap:SupportsAnyFileType /></uap:SupportedFileTypes>')
 }
 [System.IO.File]::WriteAllText((Join-Path $pkgRoot "AppxManifest.xml"), $manifest, $utf8)
 Copy-Item (Join-Path $root "packaging\Assets\*.png") (Join-Path $pkgRoot "Assets")

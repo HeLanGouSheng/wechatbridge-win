@@ -69,8 +69,17 @@ public static class Registration
         }
         else if (hr is ErrorInstallFailed or ErrorAlreadyExists)
         {
-            // Not removing first by default: removing the package would end an identity-bearing process
-            // (possibly this one) mid-command. Only fall back to removal when the update is refused.
+            // Same version, different content. Removing the old registration would end every process
+            // that runs as this package — including this one when it was started from the registered
+            // folder (tried: the command died mid-way and left nothing registered). So only remove when
+            // this process has no identity; otherwise say what to do.
+            if (PackageIdentity.HasIdentity())
+            {
+                log.WriteLine("同版本已注册但内容变了，而这个命令本身正以那个包的身份运行，不能替它解除注册。");
+                log.WriteLine("两种办法：重新打包（build-package.ps1 每次会换新版本号），或者先运行 --unregister，再运行 --register。");
+                return 1;
+            }
+
             log.WriteLine("同版本已注册且无法就地更新，先解除再注册 …");
             await RemoveExistingAsync(manager, log);
             (hr, text) = await AddAsync(manager, options);

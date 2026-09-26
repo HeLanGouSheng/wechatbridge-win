@@ -7,7 +7,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$Version = "0.1.0.0",
+    [string]$Version = "",
     [switch]$AnyFileType,
     [string]$Configuration = "Release"
 )
@@ -25,7 +25,8 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXIT
 $publishDir = Join-Path $root "src\Bridge.App\bin\$Configuration\net8.0-windows10.0.19041.0\win-x64\publish"
 if (-not (Test-Path (Join-Path $publishDir "WeChatBridge.exe"))) { throw "Publish output not found at $publishDir" }
 
-$buildArgs = @{ Version = $Version }
+$buildArgs = @{}
+if ($Version -ne "") { $buildArgs.Version = $Version }
 if ($AnyFileType) { $buildArgs.AnyFileType = $true }
 & (Join-Path $PSScriptRoot "build-package.ps1") @buildArgs
 

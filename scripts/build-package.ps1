@@ -56,10 +56,11 @@ $xml = [xml]$manifest
 $publisher = $xml.Package.Identity.Publisher
 $packageName = $xml.Package.Identity.Name
 
-# 2. Certificate: reuse the one made earlier on this machine, else create it.
-$pfx = Join-Path $dist "dev-cert.pfx"
+# 2. Certificate: one per publisher subject, reused across builds (it is what the machine trusts).
+$publisherCn = ($publisher -replace '^CN=', '') -replace '[^A-Za-z0-9._-]', '_'
+$pfx = Join-Path $dist "dev-cert-$publisherCn.pfx"
 $cer = Join-Path $dist "$packageName.cer"
-$thumbFile = Join-Path $dist "dev-cert.thumbprint"
+$thumbFile = Join-Path $dist "dev-cert-$publisherCn.thumbprint"
 $password = if ($env:BRIDGE_PFX_PASSWORD) { $env:BRIDGE_PFX_PASSWORD } else { "wechatbridge-dev" }
 $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
 

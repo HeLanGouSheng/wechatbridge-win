@@ -40,8 +40,19 @@ public class IdentityConsistencyTests
         Assert.Equal(BridgeIdentity.ProductName, app.Element(uap + "VisualElements")!.Attribute("DisplayName")!.Value);
 
         var share = app.Element(ns + "Extensions")!.Elements(uap + "Extension").Single(e => e.Attribute("Category")!.Value == "windows.shareTarget").Element(uap + "ShareTarget")!;
-        Assert.Contains(".zip", share.Element(uap + "SupportedFileTypes")!.Elements(uap + "FileType").Select(e => e.Value));
+        // The TransferTarget platform behind WeChat's picker only lists targets that accept any file type.
+        Assert.NotNull(share.Element(uap + "SupportedFileTypes")!.Element(uap + "SupportsAnyFileType"));
         Assert.Contains("StorageItems", share.Elements(uap + "DataFormat").Select(e => e.Value));
+    }
+
+    [Fact]
+    public void 身份字符串不含微信字样()
+    {
+        // WeChat's picker hides its own share entry by name; anything that looks like it disappears too.
+        foreach (var value in new[] { BridgeIdentity.PackageName, BridgeIdentity.ApplicationId, BridgeIdentity.ProductName })
+        {
+            Assert.DoesNotMatch("(?i)wechat|weixin|微信", value);
+        }
     }
 
     [Fact]

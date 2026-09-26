@@ -5,8 +5,8 @@
   <!-- Binds this exe to the identity package; the three values must match packaging/AppxManifest.xml. -->
   <msix xmlns="urn:schemas-microsoft-com:msix.v1"
         publisher="CN=WeChatBridgeWin"
-        packageName="WeChatBridgeWin"
-        applicationId="WeChatBridge" />
+        packageName="ChatBridgeWin"
+        applicationId="ChatBridge" />
 
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>

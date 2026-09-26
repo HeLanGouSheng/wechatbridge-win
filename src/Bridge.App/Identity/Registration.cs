@@ -48,6 +48,15 @@ public static class Registration
             return 1;
         }
 
+        if (PackageIdentity.HasIdentity())
+        {
+            // Once registered, this very command runs as the package it would be updating, and Windows
+            // refuses to update a package that is in use (deferring the update was tried and never applied).
+            // Hand the update to a PowerShell that keeps running after this process has exited — which is
+            // also how WeChat registers its own share package.
+            return RegisterFromOutside(log);
+        }
+
         var manager = new PackageManager();
         var options = new AddPackageOptions
         {
@@ -61,11 +70,8 @@ public static class Registration
 
         if (hr == ErrorPackagesInUse)
         {
-            // Once registered, this very command runs as the package it is re-registering, so Windows
-            // sees the package "in use". Deferring makes the update land the moment this process exits.
-            log.WriteLine("微信桥正在运行（多半就是这个命令本身）：注册已排队，退出后立即生效。");
-            options.DeferRegistrationWhenPackagesAreInUse = true;
-            (hr, text) = await AddAsync(manager, options);
+            log.WriteLine($"{BridgeIdentity.ProductName}正在运行：关掉它的窗口再运行一次 --register。");
+            return 1;
         }
         else if (hr is ErrorInstallFailed or ErrorAlreadyExists)
         {
@@ -93,6 +99,31 @@ public static class Registration
 
         log.WriteLine("已注册。微信 → 多选消息 → 转发 → 转发到其他应用 → 选择电脑中的应用，里面应该有「微信桥」。");
         log.WriteLine("没有的话先把微信整个退出再打开一次，它会重新读一遍系统里的共享目标。");
+        return 0;
+    }
+
+    /// <summary>Update path for a process that already carries the package identity: a detached PowerShell
+    /// re-registers the package after this process is gone. -ForceTargetApplicationShutdown closes any
+    /// other instance still running; -ForceUpdateFromAnyVersion accepts the same version number.</summary>
+    private static int RegisterFromOutside(TextWriter log)
+    {
+        var command =
+            $"Start-Sleep -Milliseconds 800; Add-AppxPackage -Path '{PackagePath}' -ExternalLocation '{AppPaths.InstallDirectory}' -ForceUpdateFromAnyVersion -ForceTargetApplicationShutdown";
+        var start = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "powershell.exe",
+            Arguments = $"-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -Command \"{command}\"",
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        using var process = System.Diagnostics.Process.Start(start);
+        if (process is null)
+        {
+            log.WriteLine("启动 PowerShell 失败，无法更新注册。手动执行：Add-AppxPackage -Path <msix> -ExternalLocation <程序目录> -ForceUpdateFromAnyVersion");
+            return 1;
+        }
+
+        log.WriteLine($"已注册过的版本正在运行（就是这个命令本身），更新交给 PowerShell 在本进程退出后完成。几秒后用 --status 确认版本。");
         return 0;
     }
 

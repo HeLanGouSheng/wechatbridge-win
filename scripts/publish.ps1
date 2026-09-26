@@ -31,8 +31,12 @@ if ($AnyFileType) { $buildArgs.AnyFileType = $true }
 & (Join-Path $PSScriptRoot "build-package.ps1") @buildArgs
 
 $dist = Join-Path $root "dist"
-Copy-Item (Join-Path $dist "WeChatBridgeWin.msix") $publishDir -Force
-Copy-Item (Join-Path $dist "WeChatBridgeWin.cer") $publishDir -Force
+# Read as UTF-8 explicitly: the manifest has Chinese in it and Get-Content would decode it as ANSI.
+$identity = ([xml][System.IO.File]::ReadAllText((Join-Path $root "packaging\AppxManifest.xml"), (New-Object System.Text.UTF8Encoding($false)))).Package.Identity
+$packageName = $identity.Name
+$publisherCn = ($identity.Publisher -replace '^CN=', '') -replace '[^A-Za-z0-9._-]', '_'
+Copy-Item (Join-Path $dist "$packageName.msix") $publishDir -Force
+Copy-Item (Join-Path $dist "$packageName.cer") $publishDir -Force
 
 # Windows resolves a package-with-external-location's logos from the external location (the app folder),
 # not from the msix. Without them AppListEntry.DisplayInfo.GetLogo throws 0x80070490 and WeChat drops the
@@ -43,7 +47,7 @@ Copy-Item (Join-Path $root "packaging\Assets\*.png") (Join-Path $publishDir "Ass
 # Sign the exe with the same certificate so its publisher matches the package (no SmartScreen benefit, but consistent).
 $kits = "C:\Program Files (x86)\Windows Kits\10\bin\10.0.19041.0\x64"
 $password = if ($env:BRIDGE_PFX_PASSWORD) { $env:BRIDGE_PFX_PASSWORD } else { "wechatbridge-dev" }
-& (Join-Path $kits "signtool.exe") sign /fd SHA256 /f (Join-Path $dist "dev-cert.pfx") /p $password (Join-Path $publishDir "WeChatBridge.exe") | Out-Null
+& (Join-Path $kits "signtool.exe") sign /fd SHA256 /f (Join-Path $dist "dev-cert-$publisherCn.pfx") /p $password (Join-Path $publishDir "WeChatBridge.exe") | Out-Null
 
 Write-Host ""
 Write-Host "Published to $publishDir"

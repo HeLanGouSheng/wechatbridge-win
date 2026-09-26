@@ -57,32 +57,50 @@ public static class Registration
         };
 
         log.WriteLine($"正在注册 {BridgeIdentity.PackageName}，外部位置 {AppPaths.InstallDirectory} …");
-        var result = await manager.AddPackageByUriAsync(new Uri(PackagePath), options);
+        var (hr, text) = await AddAsync(manager, options);
 
-        if (result.ExtendedErrorCode is { HResult: ErrorPackagesInUse })
+        if (hr == ErrorPackagesInUse)
         {
-            log.WriteLine("微信桥正在运行；注册会在它退出后生效。");
+            // Once registered, this very command runs as the package it is re-registering, so Windows
+            // sees the package "in use". Deferring makes the update land the moment this process exits.
+            log.WriteLine("微信桥正在运行（多半就是这个命令本身）：注册已排队，退出后立即生效。");
             options.DeferRegistrationWhenPackagesAreInUse = true;
-            result = await manager.AddPackageByUriAsync(new Uri(PackagePath), options);
+            (hr, text) = await AddAsync(manager, options);
         }
-        else if (result.ExtendedErrorCode is { HResult: ErrorInstallFailed or ErrorAlreadyExists })
+        else if (hr is ErrorInstallFailed or ErrorAlreadyExists)
         {
-            // Not removing first by default: this very process may be running with identity, and removing
-            // the package would end it mid-command. Only fall back to removal when the update is refused.
+            // Not removing first by default: removing the package would end an identity-bearing process
+            // (possibly this one) mid-command. Only fall back to removal when the update is refused.
             log.WriteLine("同版本已注册且无法就地更新，先解除再注册 …");
             await RemoveExistingAsync(manager, log);
-            result = await manager.AddPackageByUriAsync(new Uri(PackagePath), options);
+            (hr, text) = await AddAsync(manager, options);
         }
 
-        if (result.ExtendedErrorCode is not null && result.ExtendedErrorCode.HResult != 0)
+        if (hr != 0)
         {
-            log.WriteLine(Explain(result));
+            log.WriteLine(Explain(hr, text));
             return 1;
         }
 
         log.WriteLine("已注册。微信 → 多选消息 → 转发 → 转发到其他应用 → 选择电脑中的应用，里面应该有「微信桥」。");
         log.WriteLine("没有的话先把微信整个退出再打开一次，它会重新读一遍系统里的共享目标。");
         return 0;
+    }
+
+    /// <summary>The deployment API reports some failures in the result and throws others (packages in
+    /// use, access denied); both carry the same HRESULTs, so they are folded into one shape here.</summary>
+    private static async Task<(int HResult, string Text)> AddAsync(PackageManager manager, AddPackageOptions options)
+    {
+        try
+        {
+            var result = await manager.AddPackageByUriAsync(new Uri(PackagePath), options);
+            var hr = result.ExtendedErrorCode?.HResult ?? 0;
+            return (hr, result.ErrorText ?? string.Empty);
+        }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return (ex.HResult, ex.Message);
+        }
     }
 
     public static async Task<int> UnregisterAsync(TextWriter log)
@@ -107,15 +125,22 @@ public static class Registration
 
             // Say it before doing it: if this process has identity it may not survive the removal.
             log.WriteLine($"正在解除注册 {package.Id.FullName} …");
-            var result = await manager.RemovePackageAsync(package.Id.FullName);
-            if (result.ExtendedErrorCode is not null && result.ExtendedErrorCode.HResult != 0)
+            try
             {
-                log.WriteLine(Explain(result));
+                var result = await manager.RemovePackageAsync(package.Id.FullName);
+                if (result.ExtendedErrorCode is not null && result.ExtendedErrorCode.HResult != 0)
+                {
+                    log.WriteLine(Explain(result.ExtendedErrorCode.HResult, result.ErrorText ?? string.Empty));
+                    continue;
+                }
             }
-            else
+            catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or UnauthorizedAccessException)
             {
-                removed++;
+                log.WriteLine(Explain(ex.HResult, ex.Message));
+                continue;
             }
+
+            removed++;
         }
 
         return removed;
@@ -272,9 +297,8 @@ public static class Registration
         }
     }
 
-    private static string Explain(DeploymentResult result)
+    private static string Explain(int hr, string errorText)
     {
-        var hr = result.ExtendedErrorCode?.HResult ?? 0;
         var hint = hr switch
         {
             unchecked((int)0x800B0109) => "证书不被信任：确认 .cer 和 msix 出自同一次 build-package.ps1，再运行一次 --register",
@@ -289,6 +313,6 @@ public static class Registration
             ErrorPackagesInUse => "微信桥正在运行：关掉它再试",
             _ => "详情看事件查看器：应用程序和服务日志 → Microsoft → Windows → AppXDeployment-Server",
         };
-        return $"注册失败 0x{hr:X8}：{result.ErrorText}\n{hint}";
+        return $"注册失败 0x{hr:X8}：{errorText.Trim()}\n{hint}";
     }
 }

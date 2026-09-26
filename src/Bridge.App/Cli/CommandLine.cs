@@ -36,6 +36,7 @@ public static class CommandLine
                 "--status" => Registration.Status(log),
                 "--trust-cert" => Registration.TrustCertificate(log),
                 "--identity" => Identity(log),
+                "--parse" when args.Length > 1 => Parse(args[1], log),
                 "--help" or "-h" or "/?" => Help(log),
                 _ => Unknown(args[0], log),
             };
@@ -60,6 +61,37 @@ public static class CommandLine
         return 0;
     }
 
+    /// <summary>What the parser makes of a ZIP, without touching the inbox — for checking an export by
+    /// hand and for bug reports.</summary>
+    private static int Parse(string zipPath, TextWriter log)
+    {
+        if (!File.Exists(zipPath))
+        {
+            log.WriteLine($"找不到文件 {zipPath}");
+            return 1;
+        }
+
+        try
+        {
+            var archive = Bridge.Core.Archives.NativeArchive.ReadTranscript(zipPath);
+            var chat = Bridge.Core.Naming.DisplayName.ChatNameFromArchiveName(Path.GetFileName(zipPath));
+            log.WriteLine($"{archive.EntryName}：{archive.Transcript.Messages.Count} 条消息，发送者 {string.Join("、", archive.Transcript.Senders)}" +
+                          (chat is null ? "" : $"，文件名里的聊天名「{chat}」") +
+                          (archive.AttachmentNames.Count == 0 ? "" : $"，附件 {archive.AttachmentNames.Count} 个"));
+            foreach (var m in archive.Transcript.Messages)
+            {
+                log.WriteLine($"{m.SentAt:yyyy-MM-dd HH:mm}  {m.Sender}：{m.Text.Replace("\n", " ⏎ ")}");
+            }
+
+            return 0;
+        }
+        catch (Bridge.Core.Archives.ArchiveException ex)
+        {
+            log.WriteLine(ex.Message);
+            return 1;
+        }
+    }
+
     private static int Help(TextWriter log)
     {
         log.WriteLine($"{BridgeIdentity.ProductName} {typeof(CommandLine).Assembly.GetName().Version}");
@@ -69,6 +101,7 @@ public static class CommandLine
         log.WriteLine("  WeChatBridge.exe --identity     只打印本进程的包身份");
         log.WriteLine("  WeChatBridge.exe --trust-cert   （管理员）把自签证书放进这台电脑的「受信任人」；--register 会自动调用");
         log.WriteLine("  WeChatBridge.exe <文件.zip>      不经微信，直接处理一个导出的压缩包");
+        log.WriteLine("  WeChatBridge.exe --parse <文件.zip>  只解析、打印消息，不进收件箱");
         log.WriteLine("  加 --quiet 不弹结果窗口（给安装脚本用）");
         return 0;
     }

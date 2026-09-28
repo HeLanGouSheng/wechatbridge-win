@@ -66,7 +66,7 @@ WeChatBridge.exe --send 某个导出.zip [--chat-name 群名]     # 不经微信
 .\scripts\package-release.ps1        # publish + dist\WeChatBridge-win-x64.zip + .sha256
 ```
 
-llmsocial 默认从 GitHub Release 的 `WeChatBridge-win-x64.zip` 下载（旁边要有 `.sha256`）；`LLMSOCIAL_WECHAT_BRIDGE_URL` 可以改成别的地址或本地路径。
+llmsocial 从 GitHub Release 的 `WeChatBridge-win-x64.zip` 下载（旁边要有 `.sha256`），版本号钉在 llmsocial 的 `src/server/config.ts`（`WECHAT_BRIDGE_RELEASE`）：发了新版要去那边改一行；`LLMSOCIAL_WECHAT_BRIDGE_URL` 可以改成别的地址或本地路径。
 
 ## 不经微信测试
 
@@ -82,4 +82,4 @@ WeChatBridge.exe 某个导出的.zip
 
 ## 许可
 
-MIT。源自 [freestylefly/WeChatBridge](https://github.com/freestylefly/WeChatBridge)（MIT）。
+MIT（见 LICENSE）。源自 [freestylefly/WeChatBridge](https://github.com/freestylefly/WeChatBridge)（MIT）。

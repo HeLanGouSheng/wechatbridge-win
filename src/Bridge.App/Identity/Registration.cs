@@ -97,7 +97,7 @@ public static class Registration
             return 1;
         }
 
-        log.WriteLine("已注册。微信 → 多选消息 → 转发 → 转发到其他应用 → 选择电脑中的应用，里面应该有「微信桥」。");
+        log.WriteLine($"已注册。微信 → 多选消息 → 转发 → 转发到其他应用 → 选择电脑中的应用，里面应该有「{BridgeIdentity.ProductName}」。");
         log.WriteLine("没有的话先把微信整个退出再打开一次，它会重新读一遍系统里的共享目标。");
         return 0;
     }
@@ -147,7 +147,7 @@ public static class Registration
     {
         var manager = new PackageManager();
         var removed = await RemoveExistingAsync(manager, log);
-        log.WriteLine(removed == 0 ? "没有找到已注册的微信桥。" : $"已解除注册 {removed} 个。");
+        log.WriteLine(removed == 0 ? $"没有找到已注册的{BridgeIdentity.ProductName}。" : $"已解除注册 {removed} 个。");
         return 0;
     }
 
@@ -442,7 +442,7 @@ public static class Registration
             unchecked((int)0x80073CFF) or unchecked((int)0x80073D01) => "组策略禁止安装未上架的应用，联系管理员",
             unchecked((int)0x80070005) => "程序目录不可读：不要放在受保护目录或网络盘里",
             ErrorInstallFailed or ErrorAlreadyExists => "同版本已注册：先运行 --unregister，再 --register",
-            ErrorPackagesInUse => "微信桥正在运行：关掉它再试",
+            ErrorPackagesInUse => $"{BridgeIdentity.ProductName}正在运行：关掉它再试",
             _ => "详情看事件查看器：应用程序和服务日志 → Microsoft → Windows → AppXDeployment-Server",
         };
         return $"注册失败 0x{hr:X8}：{errorText.Trim()}\n{hint}";

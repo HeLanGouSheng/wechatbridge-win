@@ -10,7 +10,7 @@ namespace Bridge.App;
 
 public abstract record LaunchMode
 {
-    /// <summary>WeChat (or any app) picked 微信桥 in the Windows share list.</summary>
+    /// <summary>WeChat (or any app) picked 聊天桥 in the Windows share list.</summary>
     public sealed record Share(ShareOperation Operation) : LaunchMode;
 
     /// <summary>A .zip given on the command line or dropped on the exe: the same pipeline without WeChat.</summary>

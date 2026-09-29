@@ -8,6 +8,6 @@
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <Version>0.1.0</Version>
     <Authors>MacauMuse</Authors>
-    <Product>微信桥</Product>
+    <Product>聊天桥</Product>
   </PropertyGroup>
 </Project>

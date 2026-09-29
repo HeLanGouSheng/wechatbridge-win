@@ -1,4 +1,4 @@
-# 微信桥（wechatbridge-win）
+# 聊天桥（wechatbridge-win）
 
 Windows 桌面程序：把微信「转发到其他应用」导出的聊天记录 ZIP 送到 llmsocial（以及以后的 AI 应用、Obsidian）。原理：注册成 Windows 共享目标（外部位置包 / sparse package），出现在微信「选择电脑中的应用」菜单里，直接收到微信打的 ZIP。源自 macOS 的 [freestylefly/WeChatBridge](https://github.com/freestylefly/WeChatBridge)（MIT），Core 的行为规则逐条对照它的 Swift 源码和测试移植。
 
